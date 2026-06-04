@@ -110,6 +110,39 @@ async def get_leaderboard(request):
         logger.error(f"leaderboard error: {e}")
         return web.json_response({'error': str(e)}, status=500, headers=CORS)
 
+
+async def update_idea(request):
+    try:
+        data = await request.json()
+        idea_id = data.get('idea_id')
+        user_id = data.get('user_id')
+        if not idea_id or not user_id:
+            return web.json_response({'error': 'missing'}, status=400, headers=CORS)
+        ok = db.update_idea(
+            idea_id=int(idea_id), user_id=int(user_id),
+            content=data.get('content'),
+            topic=data.get('topic'),
+            url=data.get('url'),
+            estimated_hours=data.get('estimated_hours')
+        )
+        return web.json_response({'ok': ok}, headers=CORS)
+    except Exception as e:
+        logger.error(f"update_idea error: {e}")
+        return web.json_response({'error': str(e)}, status=500, headers=CORS)
+
+async def delete_idea(request):
+    try:
+        data = await request.json()
+        idea_id = data.get('idea_id')
+        user_id = data.get('user_id')
+        if not idea_id or not user_id:
+            return web.json_response({'error': 'missing'}, status=400, headers=CORS)
+        ok = db.delete_idea(int(idea_id), int(user_id))
+        return web.json_response({'ok': ok}, headers=CORS)
+    except Exception as e:
+        logger.error(f"delete_idea error: {e}")
+        return web.json_response({'error': str(e)}, status=500, headers=CORS)
+
 async def options_handler(request):
     return web.Response(headers=CORS)
 
@@ -124,6 +157,8 @@ def create_app():
     app.router.add_post('/api/done', mark_done)
     app.router.add_post('/api/voice', voice_endpoint)
     app.router.add_get('/api/leaderboard', get_leaderboard)
+    app.router.add_post('/api/ideas/update', update_idea)
+    app.router.add_post('/api/ideas/delete', delete_idea)
     app.router.add_route('OPTIONS', '/api/ideas', options_handler)
     app.router.add_route('OPTIONS', '/api/done', options_handler)
     app.router.add_route('OPTIONS', '/api/voice', options_handler)
