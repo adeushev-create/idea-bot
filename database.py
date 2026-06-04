@@ -242,3 +242,38 @@ class Database:
                 return {r[0]: r[1] for r in cur.fetchall()}
             except:
                 return {}
+
+    def update_idea(self, idea_id: int, user_id: int, content: str = None,
+                    topic: str = None, url: str = None, estimated_hours: float = None) -> bool:
+        with self._conn() as conn:
+            cur = conn.cursor()
+            updates = []
+            values = []
+            if content is not None:
+                updates.append("content = %s" if USE_PG else "content = ?")
+                values.append(content)
+            if topic is not None:
+                updates.append("topic = %s" if USE_PG else "topic = ?")
+                values.append(topic)
+            if url is not None:
+                updates.append("url = %s" if USE_PG else "url = ?")
+                values.append(url)
+            if estimated_hours is not None:
+                updates.append("estimated_hours = %s" if USE_PG else "estimated_hours = ?")
+                values.append(estimated_hours)
+            if not updates:
+                return False
+            ph = "%s" if USE_PG else "?"
+            query = f"UPDATE ideas SET {', '.join(updates)} WHERE id = {ph} AND user_id = {ph}"
+            values.extend([idea_id, user_id])
+            cur.execute(query, values)
+            conn.commit()
+            return cur.rowcount > 0
+
+    def delete_idea(self, idea_id: int, user_id: int) -> bool:
+        with self._conn() as conn:
+            cur = conn.cursor()
+            ph = "%s" if USE_PG else "?"
+            cur.execute(f"DELETE FROM ideas WHERE id = {ph} AND user_id = {ph}", (idea_id, user_id))
+            conn.commit()
+            return cur.rowcount > 0
