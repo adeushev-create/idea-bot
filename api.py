@@ -160,6 +160,8 @@ def create_app():
     app.router.add_post('/api/ideas/update', update_idea)
     app.router.add_post('/api/ideas/delete', delete_idea)
     app.router.add_route('OPTIONS', '/api/ideas', options_handler)
+    app.router.add_route('OPTIONS', '/api/ideas/update', options_handler)
+    app.router.add_route('OPTIONS', '/api/ideas/delete', options_handler)
     app.router.add_route('OPTIONS', '/api/done', options_handler)
     app.router.add_route('OPTIONS', '/api/voice', options_handler)
     return app
