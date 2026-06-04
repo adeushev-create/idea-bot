@@ -43,6 +43,7 @@ def get_topic_emoji(topic: str) -> str:
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     db.save_user(message.from_user.id)
+    db.save_username(message.from_user.id, message.from_user.username or '', message.from_user.first_name or 'User')
     avatar = get_avatar(message.from_user.id)
     name = message.from_user.first_name or "друг"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
@@ -155,6 +156,7 @@ async def handle_voice(message: Message):
 async def handle_text(message: Message):
     if message.text.startswith("/"):
         return
+    db.save_username(message.from_user.id, message.from_user.username or '', message.from_user.first_name or 'User')
     await process_and_save(message, message.text)
 
 async def process_and_save(message: Message, text: str):
