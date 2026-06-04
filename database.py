@@ -137,3 +137,48 @@ class Database:
             if row:
                 return dict(row)
             return {"xp": 0, "total_ideas": 0, "done_count": 0, "links_count": 0}
+
+    def get_leaderboard(self, limit: int = 20) -> List[Dict]:
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """SELECT user_id, xp, total_ideas, done_count
+                   FROM users
+                   ORDER BY xp DESC
+                   LIMIT ?""",
+                (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def save_username(self, user_id: int, username: str, first_name: str):
+        with self._conn() as conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS usernames (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO usernames (user_id, username, first_name)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                   username=excluded.username, first_name=excluded.first_name""",
+                (user_id, username, first_name)
+            )
+            conn.commit()
+
+    def get_usernames(self, user_ids: List[int]) -> Dict:
+        if not user_ids:
+            return {}
+        with self._conn() as conn:
+            conn.row_factory = sqlite3.Row
+            placeholders = ','.join('?' * len(user_ids))
+            try:
+                cursor = conn.execute(
+                    f"SELECT user_id, first_name FROM usernames WHERE user_id IN ({placeholders})",
+                    user_ids
+                )
+                return {row['user_id']: row['first_name'] for row in cursor.fetchall()}
+            except:
+                return {}
