@@ -160,13 +160,10 @@ async def handle_text(message: Message):
     # Шаг 1 — фильтрация: является ли это идеей?
     check = await ai.is_idea(text)
 
-    if not check.get("is_idea") and check.get("confidence", 0) > 60:
-        await message.answer(
-            "💬 Это не похоже на идею или заметку.\n\n"
-            "Если хочешь что-то сохранить — опиши конкретнее.\n"
-            "Например: _«хочу прочитать книгу X»_ или _«сделать Y»_",
-            parse_mode="Markdown"
-        )
+    if not check.get("is_idea") and check.get("confidence", 0) > 70:
+        # Используем ответ от AI или стандартный
+        reply = check.get("reply") or "Это не похоже на идею 🤔 Если хочешь что-то сохранить — опиши конкретнее."
+        await message.answer(f"💬 {reply}\n\n_Пример: «хочу прочитать книгу X» или «сделать лендинг»_", parse_mode="Markdown")
         return
 
     # Шаг 2 — анализ и предпросмотр с подтверждением
