@@ -144,6 +144,44 @@ class AIProcessor:
             text += "\n"
         return text
 
+
+    async def is_idea(self, text: str) -> dict:
+        """Проверяет является ли текст идеей/заметкой или просто сообщением"""
+        prompt = f"""Определи является ли этот текст идеей, заметкой, задачей или чем-то что стоит сохранить.
+
+Текст: "{text}"
+
+Верни ТОЛЬКО JSON без пояснений:
+{{
+  "is_idea": true или false,
+  "confidence": число от 0 до 100,
+  "reason": "одна фраза почему"
+}}
+
+Примеры НЕ идей (is_idea: false):
+- "ты тут?", "привет", "окей", "спасибо"
+- вопросы к боту: "что ты умеешь?", "как дела?"
+- короткие реакции: "круто", "понял", "ок"
+
+Примеры ИДЕЙ (is_idea: true):
+- "хочу прочитать книгу про маркетинг"
+- "сделать лендинг для проекта"
+- любые ссылки
+- планы, мысли, задачи, идеи проектов
+- заметки о чём угодно полезном"""
+        
+        try:
+            result = await self._groq_chat(prompt, max_tokens=100)
+            import re, json
+            json_match = re.search(r'\{.*\}', result, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+        except Exception as e:
+            logger.error(f"is_idea error: {e}")
+        
+        # По умолчанию считаем идеей если длина > 15 символов
+        return {"is_idea": len(text) > 15, "confidence": 50, "reason": "неизвестно"}
+
     async def _groq_chat(self, prompt: str, max_tokens: int = 800) -> str:
         """Запрос к Groq LLM (Llama)"""
         async with httpx.AsyncClient(timeout=30) as client:
