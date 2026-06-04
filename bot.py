@@ -8,8 +8,7 @@ from scheduler import setup_scheduler
 from api import create_app
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, WebAppInfo
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,6 +21,9 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 db = Database()
 ai = AIProcessor(groq_api_key=GROQ_API_KEY)
+
+# Хранит ожидающие подтверждения идеи
+pending_ideas = {}
 
 AVATARS = ["🦊","🐺","🦁","🐯","🦅","🐉","🦋","🦩","🐬","🦄","🐸","🦀"]
 
@@ -40,6 +42,7 @@ def get_topic_emoji(topic: str) -> str:
             return emojis[key]
     return "📌"
 
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
     db.save_user(message.from_user.id)
@@ -47,10 +50,7 @@ async def cmd_start(message: Message):
     avatar = get_avatar(message.from_user.id)
     name = message.from_user.first_name or "друг"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="⚡ Открыть FLUX",
-            web_app=WebAppInfo(url=WEBAPP_URL)
-        )
+        InlineKeyboardButton(text="⚡ Открыть FLUX", web_app=WebAppInfo(url=WEBAPP_URL))
     ]])
     await message.answer(
         f"{avatar} {name}, привет!\n\n"
@@ -58,12 +58,12 @@ async def cmd_start(message: Message):
         f"Как закидывать идеи:\n"
         f"🎤 Голосовое сообщение\n"
         f"✍️ Текст\n"
-        f"🔗 Ссылка на статью, видео, пост\n"
-        f"📸 Фото с заметками или скриншот\n\n"
+        f"🔗 Ссылка на статью, видео, пост\n\n"
         f"Я сохраню и разложу по темам. Каждую пятницу получишь план на выходные — чтобы ни одна идея не потерялась. Соревнуйся с друзьями: кто больше реализует своих идей.\n\n"
-        f"👇 Удобнее всего через мини-приложение — там интерфейс, статистика и рейтинг:",
+        f"👇 Удобнее всего через мини-приложение:",
         reply_markup=keyboard
     )
+
 
 @dp.message(Command("list"))
 async def cmd_list(message: Message):
@@ -76,11 +76,9 @@ async def cmd_list(message: Message):
         status = "✅" if idea["done"] else "⬜"
         emoji = get_topic_emoji(idea["topic"])
         text += f"{status} {i}. {emoji} *{idea['topic']}*\n"
-        text += f"   {idea['content'][:100]}{'...' if len(idea['content']) > 100 else ''}\n"
-        if idea.get("url"):
-            text += f"   🔗 {idea['url']}\n"
-        text += "\n"
+        text += f"   {idea['content'][:100]}{'...' if len(idea['content']) > 100 else ''}\n\n"
     await message.answer(text, parse_mode="Markdown")
+
 
 @dp.message(Command("summary"))
 async def cmd_summary(message: Message):
@@ -91,6 +89,7 @@ async def cmd_summary(message: Message):
         return
     summary = await ai.generate_weekly_summary(ideas)
     await message.answer(summary, parse_mode="Markdown")
+
 
 @dp.message(Command("done"))
 async def cmd_done(message: Message):
@@ -108,10 +107,9 @@ async def cmd_done(message: Message):
     total_xp = db.get_user_xp(message.from_user.id)
     avatar = get_avatar(message.from_user.id)
     await message.answer(
-        f"✅ Выполнено!\n"
-        f"⚡ +{xp_gained} XP\n"
-        f"{avatar} Всего XP: {total_xp}"
+        f"✅ Выполнено!\n⚡ +{xp_gained} XP\n{avatar} Всего XP: {total_xp}"
     )
+
 
 @dp.message(Command("stats"))
 async def cmd_stats(message: Message):
@@ -126,13 +124,12 @@ async def cmd_stats(message: Message):
         f"{avatar} *Твой профиль FLUX*\n\n"
         f"🎯 {level_name} (ур. {level})\n"
         f"[{bar}] {xp_in_level}/100 XP\n\n"
-        f"📊 Статистика:\n"
-        f"💡 Идей записано: {stats['total_ideas']}\n"
+        f"💡 Идей: {stats['total_ideas']}\n"
         f"✅ Выполнено: {stats['done_count']}\n"
-        f"🔗 Ссылок: {stats['links_count']}\n"
         f"⚡ Всего XP: {stats['xp']}",
         parse_mode="Markdown"
     )
+
 
 @dp.message(F.voice)
 async def handle_voice(message: Message):
@@ -151,12 +148,90 @@ async def handle_voice(message: Message):
         logger.error(f"Voice error: {e}")
         await message.answer("❌ Ошибка. Попробуй текстом.")
 
+
 @dp.message(F.text)
 async def handle_text(message: Message):
     if message.text.startswith("/"):
         return
     db.save_username(message.from_user.id, message.from_user.username or '', message.from_user.first_name or 'User')
-    await process_and_save(message, message.text)
+
+    text = message.text.strip()
+
+    # Шаг 1 — фильтрация: является ли это идеей?
+    check = await ai.is_idea(text)
+
+    if not check.get("is_idea") and check.get("confidence", 0) > 60:
+        await message.answer(
+            "💬 Это не похоже на идею или заметку.\n\n"
+            "Если хочешь что-то сохранить — опиши конкретнее.\n"
+            "Например: _«хочу прочитать книгу X»_ или _«сделать Y»_",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Шаг 2 — анализ и предпросмотр с подтверждением
+    thinking_msg = await message.answer("🧠 Анализирую...")
+    analysis = await ai.analyze_idea(text)
+    await thinking_msg.delete()
+
+    topic = analysis.get("topic", "Разное")
+    clean_text = analysis.get("clean_text", text)
+    emoji = get_topic_emoji(topic)
+    estimated_hours = analysis.get("estimated_hours")
+    xp_reward = analysis.get("xp_reward", 10)
+
+    # Сохраняем в pending до подтверждения
+    pending_ideas[message.from_user.id] = {"text": text, "analysis": analysis}
+
+    preview = f"💾 Сохранить как идею?\n\n{emoji} *{topic}*\n{clean_text[:200]}"
+    if estimated_hours:
+        preview += f"\n⏱ ~{estimated_hours}ч · +{xp_reward} XP"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Сохранить", callback_data="confirm_idea"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_idea"),
+    ]])
+
+    await message.answer(preview, parse_mode="Markdown", reply_markup=keyboard)
+
+
+@dp.callback_query(lambda c: c.data == "confirm_idea")
+async def confirm_idea(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    pending = pending_ideas.get(user_id)
+
+    if not pending:
+        await callback.answer("Идея устарела, отправь снова")
+        return
+
+    analysis = pending["analysis"]
+    db.save_idea(
+        user_id=user_id,
+        content=analysis.get("clean_text", pending["text"]),
+        raw_text=pending["text"],
+        topic=analysis.get("topic", "Разное"),
+        url=analysis.get("url"),
+        estimated_hours=analysis.get("estimated_hours"),
+        xp_reward=analysis.get("xp_reward", 10)
+    )
+
+    del pending_ideas[user_id]
+    emoji = get_topic_emoji(analysis.get("topic", "Разное"))
+    await callback.message.edit_text(
+        f"✅ Сохранено!\n\n{emoji} *{analysis.get('topic','Разное')}*\n{analysis.get('clean_text', pending['text'])[:200]}",
+        parse_mode="Markdown"
+    )
+    await callback.answer("✅ Идея сохранена!")
+
+
+@dp.callback_query(lambda c: c.data == "cancel_idea")
+async def cancel_idea(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    if user_id in pending_ideas:
+        del pending_ideas[user_id]
+    await callback.message.edit_text("❌ Отменено. Идея не сохранена.")
+    await callback.answer("Отменено")
+
 
 async def process_and_save(message: Message, text: str):
     processing_msg = await message.answer("🧠 Анализирую...")
@@ -169,12 +244,9 @@ async def process_and_save(message: Message, text: str):
         xp_reward = analysis.get("xp_reward", 10)
         db.save_idea(
             user_id=message.from_user.id,
-            content=clean_text,
-            raw_text=text,
-            topic=topic,
-            url=url,
-            estimated_hours=estimated_hours,
-            xp_reward=xp_reward
+            content=clean_text, raw_text=text,
+            topic=topic, url=url,
+            estimated_hours=estimated_hours, xp_reward=xp_reward
         )
         emoji = get_topic_emoji(topic)
         response = f"✅ Сохранено!\n\n{emoji} *{topic}*\n{clean_text[:200]}"
@@ -187,6 +259,7 @@ async def process_and_save(message: Message, text: str):
         logger.error(f"Processing error: {e}")
         await processing_msg.edit_text("❌ Ошибка. Попробуй ещё раз.")
 
+
 async def run_api():
     app = create_app()
     runner = web.AppRunner(app)
@@ -196,6 +269,7 @@ async def run_api():
     await site.start()
     logger.info(f"API running on port {port}")
 
+
 async def main():
     db.init()
     scheduler = setup_scheduler(bot, db, ai)
@@ -203,6 +277,7 @@ async def main():
     await run_api()
     logger.info("FLUX Bot started!")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
